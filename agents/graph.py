@@ -32,19 +32,17 @@ class AgentState(TypedDict):
 
 def signal_processor_node(state: AgentState) -> AgentState:
     result = signal_processor.invoke({"sensor_data" : state["sensor_data"]})
+    state["signal_result"] = result
+
     query = f"Maintaince Procedure for {result['status']} equipement with std {result['std']}"
+    state["query"] = query
 
-    return {
-        "signal_result": result,
-        "query":query
-    }
-
+    return state
 
 def rag_retriever_node(state: AgentState) -> AgentState:
     result = rag_retriever.invoke({"query": state["query"]})
-    return {
-        "documents": result["documents"]
-    }
+    return {"documents":result['documents']}
+    
 
 def report_writer_node(state: AgentState) -> AgentState:
     result = report_writer.invoke({
