@@ -1,9 +1,13 @@
 import numpy as np
 from langchain_core.tools import tool
 from langchain_mistralai import ChatMistralAI
-
+import torch
+import joblib
 import os
+from models.train import LSTMModel, SENSOR_COLS
+
 from dotenv import load_dotenv
+load_dotenv()
 
 from pydantic import BaseModel, Field
 
@@ -79,6 +83,8 @@ class ReportWriterInput(BaseModel):
     mean: float = Field(description="Mean of sensor readings")
     std: float = Field(description="Standard deviation of sensor readings")
     documents: list[str] = Field(description="Relevant maintenance manual excerpts")
+    rul: int = Field(description="Predicted remaining useful life in cycles")
+    urgency: str = Field(description="Urgency level: normal, warning or critical")
 
 load_dotenv()
 llm = ChatMistralAI(model="mistral-large-latest")
@@ -104,6 +110,40 @@ def report_writer(status: str, mean: float, std: float, documents: list[str]) ->
     1. Fault Type
     2. Severity
     3. Recommended Action
+
+    Use a formal, precise and apt language when generating the report
     """
     response = llm.invoke(prompt)
     return {"report": response.content}
+
+
+# Load RUL model
+_rul_model = LSTMModel()
+_rul_model.load_state_dict(torch.load("./models/rul_model.pt", weights_only=True))
+_rul_model.eval()
+
+_scaler = joblib.load("./models/scaler.pkl")
+
+class RULPredictorInput(BaseModel):
+    window: list[list[float]] = Field(description="Last 30 cycles of sensor readings, each cycle has 17 sensors")
+
+
+# RUL Predictor
+# Takes last 30 cycles of sensor data, runs LSTM inference, returns predicted RUL
+
+@tool(args_schema=RULPredictorInput)
+def rul_predictor(window: list[list[float]]) -> dict:
+    """Predicts remaining useful life (in cycles) given last 30 cycles of sensor readings."""
+    x = np.array(window)                                    # (30, 17)
+    x = _scaler.transform(x)                                # normalize using saved scaler
+    x = torch.tensor(x, dtype=torch.float32).unsqueeze(0)  # (1, 30, 17)
+
+    with torch.no_grad():
+        rul_normalized = _rul_model(x).item()
+
+    rul_cycles = round(rul_normalized * 125)                # denormalize back to real cycles
+
+    return {
+        "rul": rul_cycles,
+        "urgency": "critical" if rul_cycles < 20 else "warning" if rul_cycles < 50 else "normal"
+    }
