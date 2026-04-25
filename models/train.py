@@ -16,7 +16,7 @@ def load_data(path: str = "./data/train_FD001.txt") -> pd.DataFrame:
     ]
     df = pd.read_csv(
         path,
-        sep=r"\s+",
+        sep=r"\s+", 
         header=None,
         names=columns,
         engine="python",
